@@ -78,7 +78,7 @@ defmodule Mix.Tasks.Compile.Dynamo do
       File.mkdir_p!(compile_path)
       Code.prepend_path compile_path
 
-      previous = Mix.Utils.read_manifest(manifest)
+      previous = read_manifest(manifest)
       Enum.each previous, fn entry ->
         Path.join(compile_path, entry <> ".beam") |> File.rm
       end
@@ -86,13 +86,51 @@ defmodule Mix.Tasks.Compile.Dynamo do
       compiled = compile_files to_compile, compile_path, root
       compiled = for { mod, _ } <- compiled, do: Atom.to_string(mod)
 
-      Mix.Utils.write_manifest(manifest, compiled)
+      write_manifest(manifest, compiled)
       compile_templates mod, dynamo[:compiled_templates], templates, compile_path
 
       :ok
     else
       acc
     end
+  end
+
+  defp read_manifest(manifest) do
+    case File.read(manifest) do
+      {:ok, contents} ->
+        Enum.reduce String.split(contents, "\n"), [], fn x, acc ->
+          case String.split(x, "\t") do
+            [beam, module, source|deps] ->
+              {deps, files} =
+                case Enum.split_while(deps, &(&1 != "Elixir")) do
+                  {deps, ["Elixir"|files]} -> {deps, files}
+                  {deps, _} -> {deps, []}
+                end
+              [{beam, module, source, deps, files}|acc]
+            _ ->
+              acc
+          end
+        end
+      {:error, _} ->
+        []
+    end
+  end
+
+    # Writes the manifest separating entries by tabs.
+  defp write_manifest(_manifest, []) do
+    :ok
+  end
+
+  defp write_manifest(manifest, entries) do
+    lines = Enum.map(entries, fn
+      {beam, module, source, deps, files, binary} ->
+        if binary, do: File.write!(beam, binary)
+        tail = deps ++ ["Elixir"] ++ files
+        [beam, module, source | tail] |> Enum.join("\t")
+    end)
+
+    File.mkdir_p!(Path.dirname(manifest))
+    File.write!(manifest, Enum.join(lines, "\n"))
   end
 
   defp set_compiler_opts(project, opts) do
